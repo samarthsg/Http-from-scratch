@@ -2,8 +2,18 @@ package request
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"strings"
+)
+
+const bufferSize = 8
+
+type parserState int
+
+const (
+	stateIntialized parserState = iota
+	stateDone
 )
 
 type RequestLine struct {
@@ -14,6 +24,7 @@ type RequestLine struct {
 
 type Request struct {
 	RequestLine RequestLine
+	State       parserState
 }
 
 func isCapitalOnly(a string) bool {
@@ -28,9 +39,27 @@ func isCapitalOnly(a string) bool {
 	return true
 }
 
-func parseRequestLine(part string) (*RequestLine, error) {
+var allDone = errors.New("Error: trying to read data in a done state")
+var err = errors.New("http: invalid request")
+var InvalidHttpRequest = errors.New("Incompatible Version found")
+var InvalidMethod = errors.New("Invalid method")
+
+func newRequest() *Request {
+	return &Request{
+		State: stateIntialized,
+	}
+}
+
+func (r *Request) parse(data []byte) (int, error) {
+	if r.State == stateDone {
+		return 0, allDone
+	}
+	r.State = stateDone
+	return len(data), nil
+}
+
+func parseRequestLine(data []byte) (*RequestLine, error, int) {
 	request := strings.Split(part, " ")
-	var err = errors.New("http: invalid request")
 	if len(request) != 3 {
 		return nil, err
 	}
@@ -41,8 +70,6 @@ func parseRequestLine(part string) (*RequestLine, error) {
 		RequestTarget: request[1],
 		Method:        request[0],
 	}
-	var InvalidHttpRequest = errors.New("Incompatible Version found")
-	var InvalidMethod = errors.New("Invalid method")
 	if ans.HttpVersion != "1.1" {
 		return nil, InvalidHttpRequest
 	}
@@ -53,15 +80,20 @@ func parseRequestLine(part string) (*RequestLine, error) {
 }
 
 func RequestFromReader(reader io.Reader) (*Request, error) {
-	allData, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, err
+	buff := make([]byte, bufferSize, bufferSize)
+	request := newRequest()
+	readToIndex := 0
+	for {
+		read, err := reader.Read(buff[readToIndex:])
+		if err == io.EOF {
+			request.State = 1
+			break
+		}
+		bytesRead, err := request.parse(buff)
+		if err == allDone {
+			fmt.Println("Parsed already : ", err)
+		}
+
 	}
-	parts := strings.Split(string(allData), "\r\n")
-	ans, parsererr := parseRequestLine(parts[0])
-	if parsererr != nil {
-		return nil, parsererr
-	}
-	req := &Request{RequestLine: *ans}
-	return req, nil
+	return request, nil
 }
