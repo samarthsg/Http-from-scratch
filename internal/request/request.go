@@ -1,10 +1,9 @@
 package request
 
 import (
+	"bytes"
 	"errors"
-	"fmt"
 	"io"
-	"strings"
 )
 
 const bufferSize = 8
@@ -51,49 +50,77 @@ func newRequest() *Request {
 }
 
 func (r *Request) parse(data []byte) (int, error) {
-	if r.State == stateDone {
-		return 0, allDone
+	bytesConsumed := 0
+outer:
+	for {
+		switch r.State {
+		case stateIntialized:
+			rl, err, n := parseRequestLine(data)
+			if err != nil {
+				return 0, err
+			}
+			if n == 0 {
+				break outer
+			}
+			r.RequestLine = *rl
+			bytesConsumed += n
+			r.State = stateDone
+		case stateDone:
+			break outer
+		}
 	}
-	r.State = stateDone
-	return len(data), nil
+	return bytesConsumed, nil
+}
+
+func (r *Request) isDone() bool {
+	return r.State == stateDone
 }
 
 func parseRequestLine(data []byte) (*RequestLine, error, int) {
-	request := strings.Split(part, " ")
-	if len(request) != 3 {
-		return nil, err
+	var seprator = []byte("\r\n")
+	request := bytes.Index(data, seprator)
+	if request == -1 {
+		return nil, nil, 0
 	}
-	version := request[2]
-	version = version[len(version)-3:]
+	firstLine := data[:request]
+	totalParsed := request + len(seprator)
+	metaData := bytes.Split(firstLine, []byte(" "))
+	if len(metaData) != 3 {
+		return nil, err, 0
+	}
+	httpParts := bytes.Split(metaData[2], []byte("/"))
+	if len(httpParts) != 2 || string(httpParts[0]) != "HTTP" || string(httpParts[1]) != "1.1" {
+		return nil, InvalidHttpRequest, 0
+	}
 	ans := &RequestLine{
-		HttpVersion:   version,
-		RequestTarget: request[1],
-		Method:        request[0],
-	}
-	if ans.HttpVersion != "1.1" {
-		return nil, InvalidHttpRequest
+		HttpVersion:   string(httpParts[1]),
+		RequestTarget: string(metaData[1]),
+		Method:        string(metaData[0]),
 	}
 	if !isCapitalOnly(ans.Method) {
-		return nil, InvalidMethod
+		return nil, InvalidMethod, 0
 	}
-	return ans, nil
+	return ans, nil, totalParsed
 }
 
 func RequestFromReader(reader io.Reader) (*Request, error) {
 	buff := make([]byte, bufferSize, bufferSize)
 	request := newRequest()
 	readToIndex := 0
-	for {
-		read, err := reader.Read(buff[readToIndex:])
+	for !request.isDone() {
+		if len(buff) == readToIndex {
+			newBuff := make([]byte, len(buff)*2)
+			copy(newBuff, buff)
+			buff = newBuff
+		}
+		n, err := reader.Read(buff[readToIndex:])
 		if err == io.EOF {
-			request.State = 1
 			break
 		}
-		bytesRead, err := request.parse(buff)
-		if err == allDone {
-			fmt.Println("Parsed already : ", err)
-		}
-
+		readToIndex += n
+		readN, err := request.parse(buff[:readToIndex])
+		copy(buff, buff[readN:readToIndex])
+		readToIndex -= readN
 	}
 	return request, nil
 }
