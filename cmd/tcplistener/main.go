@@ -2,37 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
+	"http-from-scratch/internal/request"
 	"net"
-	"strings"
 )
 
-func getLinesChannel(f io.ReadCloser) <-chan string {
-	ch := make(chan string)
-	currLine := ""
-	go func() {
-		defer f.Close()
-		defer close(ch)
-		for {
-			data := make([]byte, 8)
-			n, err := f.Read(data)
-			if err != nil {
-				break
-			}
-			parts := strings.Split(string(data[:n]), "\n")
-			for i := 0; i < len(parts)-1; i++ {
-				currLine += parts[i]
-				ch <- currLine
-				currLine = ""
-			}
-			currLine += parts[len(parts)-1]
-		}
-		if currLine != "" {
-			ch <- currLine
-		}
-	}()
-	return ch
-}
 func main() {
 	listener, err := net.Listen("tcp", ":42069")
 	if err != nil {
@@ -44,10 +17,17 @@ func main() {
 		if err != nil {
 			fmt.Print("Error:", err)
 		}
+		defer conn.Close()
 		fmt.Println("A connection has been accepted")
-		for line := range getLinesChannel(conn) {
-			fmt.Println(line)
+		req, err := request.RequestFromReader(conn)
+		if err != nil {
+			fmt.Print("ERROR: ", err)
+			break
 		}
-		fmt.Println("Connection has been closed")
+		fmt.Println("Request line:")
+		fmt.Println("-> Method: ", req.RequestLine.Method)
+		fmt.Println("-> Target: ", req.RequestLine.RequestTarget)
+		fmt.Println("-> HTTP version: ", req.RequestLine.HttpVersion)
+		fmt.Println()
 	}
 }

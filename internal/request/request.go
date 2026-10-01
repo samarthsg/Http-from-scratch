@@ -39,7 +39,7 @@ func isCapitalOnly(a string) bool {
 }
 
 var allDone = errors.New("Error: trying to read data in a done state")
-var err = errors.New("http: invalid request")
+var InvalidRequest = errors.New("http: invalid request")
 var InvalidHttpRequest = errors.New("Incompatible Version found")
 var InvalidMethod = errors.New("Invalid method")
 
@@ -86,7 +86,7 @@ func parseRequestLine(data []byte) (*RequestLine, error, int) {
 	totalParsed := request + len(seprator)
 	metaData := bytes.Split(firstLine, []byte(" "))
 	if len(metaData) != 3 {
-		return nil, err, 0
+		return nil, InvalidRequest, 0
 	}
 	httpParts := bytes.Split(metaData[2], []byte("/"))
 	if len(httpParts) != 2 || string(httpParts[0]) != "HTTP" || string(httpParts[1]) != "1.1" {
@@ -115,6 +115,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		}
 		n, err := reader.Read(buff[readToIndex:])
 		if err == io.EOF {
+			request.State = stateDone
 			break
 		}
 		readToIndex += n
