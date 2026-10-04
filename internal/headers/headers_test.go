@@ -14,7 +14,9 @@ func TestHeaderParse(t *testing.T) {
 	n, done, err := headers.Parse(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, "localhost:42069", headers["Host"])
+	assert.Equal(t, "localhost:42069", headers.Get("Host"))
+	assert.Equal(t, "localhost:42069", headers.Get("host"))
+	assert.Equal(t, "localhost:42069", headers.Get("HOST"))
 	assert.Equal(t, 25, n)
 	assert.True(t, done)
 
@@ -30,9 +32,27 @@ func TestHeaderParse(t *testing.T) {
 	n, done, err = headers.Parse(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, "localhost:42069", headers["Host"])
-	assert.Equal(t, "Mozilla Firefox", headers["User-Agent"])
-	assert.Equal(t, "*/*", headers["Accept"])
+	assert.Equal(t, "localhost:42069", headers.Get("Host"))
+	assert.Equal(t, "Mozilla Firefox", headers.Get("User-Agent"))
+	assert.Equal(t, "*/*", headers.Get("Accept"))
+	assert.True(t, done)
+	assert.Equal(t, len(data), n)
+
+	// Test: Existing header matches parsed header
+	headers = NewHeaders()
+	headers.Set("Host", "localhost")
+
+	data = []byte(
+		"Host: example.com\r\n" +
+			"User-Agent: Firefox\r\n" +
+			"\r\n",
+	)
+
+	n, done, err = headers.Parse(data)
+
+	require.NoError(t, err)
+	assert.Equal(t, "localhost, example.com", headers.Get("Host"))
+	assert.Equal(t, "Firefox", headers.Get("User-Agent"))
 	assert.True(t, done)
 	assert.Equal(t, len(data), n)
 
@@ -46,14 +66,14 @@ func TestHeaderParse(t *testing.T) {
 	n, done, err = headers.Parse(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, "localhost", headers["Host"])
-	assert.Equal(t, "Firefox", headers["User-Agent"])
+	assert.Equal(t, "localhost", headers.Get("Host"))
+	assert.Equal(t, "Firefox", headers.Get("User-Agent"))
 	assert.False(t, done)
 	assert.Equal(t, len(data), n)
 
 	// Test: Existing headers
 	headers = NewHeaders()
-	headers["Existing"] = "value"
+	headers.Set("Existing", "value")
 
 	data = []byte(
 		"Host: localhost\r\n" +
@@ -64,9 +84,9 @@ func TestHeaderParse(t *testing.T) {
 	n, done, err = headers.Parse(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, "value", headers["Existing"])
-	assert.Equal(t, "localhost", headers["Host"])
-	assert.Equal(t, "Firefox", headers["User-Agent"])
+	assert.Equal(t, "value", headers.Get("Existing"))
+	assert.Equal(t, "localhost", headers.Get("Host"))
+	assert.Equal(t, "Firefox", headers.Get("User-Agent"))
 	assert.True(t, done)
 
 	// Test: Extra whitespace around values
@@ -80,8 +100,8 @@ func TestHeaderParse(t *testing.T) {
 	n, done, err = headers.Parse(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, "localhost:42069", headers["Host"])
-	assert.Equal(t, "Mozilla Firefox", headers["User-Agent"])
+	assert.Equal(t, "localhost:42069", headers.Get("Host"))
+	assert.Equal(t, "Mozilla Firefox", headers.Get("User-Agent"))
 	assert.True(t, done)
 
 	// Test: Value containing multiple colons
@@ -91,7 +111,7 @@ func TestHeaderParse(t *testing.T) {
 	n, done, err = headers.Parse(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, "localhost:42069:1234", headers["Host"])
+	assert.Equal(t, "localhost:42069:1234", headers.Get("Host"))
 	assert.True(t, done)
 
 	// Test: Value containing spaces
@@ -101,8 +121,59 @@ func TestHeaderParse(t *testing.T) {
 	n, done, err = headers.Parse(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, "Mozilla Firefox Browser", headers["User-Agent"])
+	assert.Equal(t, "Mozilla Firefox Browser", headers.Get("User-Agent"))
 	assert.True(t, done)
+
+	// Test: Capitalized header names are case-insensitive
+	headers = NewHeaders()
+	data = []byte(
+		"HoSt: localhost:42069\r\n" +
+			"uSeR-AgEnT: Firefox\r\n" +
+			"\r\n",
+	)
+
+	n, done, err = headers.Parse(data)
+
+	require.NoError(t, err)
+	assert.Equal(t, "localhost:42069", headers.Get("Host"))
+	assert.Equal(t, "localhost:42069", headers.Get("host"))
+	assert.Equal(t, "localhost:42069", headers.Get("HOST"))
+	assert.Equal(t, "Firefox", headers.Get("User-Agent"))
+	assert.True(t, done)
+	assert.Equal(t, len(data), n)
+
+	// Test: Valid special characters in field name
+	headers = NewHeaders()
+	data = []byte("X!#$%&'*+-.^_`|~: value\r\n\r\n")
+
+	n, done, err = headers.Parse(data)
+
+	require.NoError(t, err)
+	assert.Equal(t, "value", headers.Get("X!#$%&'*+-.^_`|~"))
+	assert.True(t, done)
+	assert.Equal(t, len(data), n)
+
+	// Test: Invalid character in field name
+	headers = NewHeaders()
+	data = []byte("H©st: localhost:42069\r\n\r\n")
+
+	n, done, err = headers.Parse(data)
+
+	require.Error(t, err)
+	assert.Equal(t, 0, n)
+	assert.False(t, done)
+	assert.Empty(t, headers.Get("Host"))
+
+	// Test: Tab in field name
+	headers = NewHeaders()
+	data = []byte("Hos\t: localhost:42069\r\n\r\n")
+
+	n, done, err = headers.Parse(data)
+
+	require.Error(t, err)
+	assert.Equal(t, 0, n)
+	assert.False(t, done)
+	assert.Empty(t, headers.Get("Host"))
 
 	// Test: Leading whitespace before field name
 	headers = NewHeaders()
@@ -113,7 +184,7 @@ func TestHeaderParse(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, 0, n)
 	assert.False(t, done)
-	assert.Empty(t, headers)
+	assert.Empty(t, headers.Get("Host"))
 
 	// Test: Whitespace before colon
 	headers = NewHeaders()
@@ -124,7 +195,7 @@ func TestHeaderParse(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, 0, n)
 	assert.False(t, done)
-	assert.Empty(t, headers)
+	assert.Empty(t, headers.Get("Host"))
 
 	// Test: Empty field name
 	headers = NewHeaders()
@@ -135,7 +206,7 @@ func TestHeaderParse(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, 0, n)
 	assert.False(t, done)
-	assert.Empty(t, headers)
+	assert.Empty(t, headers.Get("Host"))
 
 	// Test: Missing colon
 	headers = NewHeaders()
@@ -146,7 +217,7 @@ func TestHeaderParse(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, 0, n)
 	assert.False(t, done)
-	assert.Empty(t, headers)
+	assert.Empty(t, headers.Get("Host"))
 
 	// Test: Empty field value
 	headers = NewHeaders()
@@ -157,7 +228,7 @@ func TestHeaderParse(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, 0, n)
 	assert.False(t, done)
-	assert.Empty(t, headers)
+	assert.Empty(t, headers.Get("Host"))
 
 	// Test: Incomplete final header
 	headers = NewHeaders()
@@ -169,8 +240,8 @@ func TestHeaderParse(t *testing.T) {
 	n, done, err = headers.Parse(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, "localhost", headers["Host"])
-	assert.Empty(t, headers["User-Agent"])
+	assert.Equal(t, "localhost", headers.Get("Host"))
+	assert.Empty(t, headers.Get("User-Agent"))
 	assert.False(t, done)
 	assert.Equal(t, len("Host: localhost\r\n"), n)
 
@@ -183,7 +254,7 @@ func TestHeaderParse(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, n)
 	assert.False(t, done)
-	assert.Empty(t, headers)
+	assert.Empty(t, headers.Get("Host"))
 
 	// Test: Only termination
 	headers = NewHeaders()
@@ -194,4 +265,14 @@ func TestHeaderParse(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
 	assert.True(t, done)
+}
+
+func TestHeaderSet(t *testing.T) {
+	headers := NewHeaders()
+
+	headers.Set("Content-Type", "Application/JSON")
+
+	assert.Equal(t, "Application/JSON", headers.Get("Content-Type"))
+	assert.Equal(t, "Application/JSON", headers.Get("content-type"))
+	assert.Equal(t, "Application/JSON", headers.Get("CONTENT-TYPE"))
 }
