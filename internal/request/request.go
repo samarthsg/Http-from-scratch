@@ -3,16 +3,17 @@ package request
 import (
 	"bytes"
 	"errors"
+	"http-from-scratch/internal/headers"
 	"io"
 )
-
-const bufferSize = 8
 
 type parserState int
 
 const (
 	stateIntialized parserState = iota
+	stateHeaders
 	stateDone
+	stateError
 )
 
 type RequestLine struct {
@@ -24,6 +25,14 @@ type RequestLine struct {
 type Request struct {
 	RequestLine RequestLine
 	State       parserState
+	Headers     *headers.Headers
+}
+
+func newRequest() *Request {
+	return &Request{
+		State:   stateIntialized,
+		Headers: headers.NewHeaders(),
+	}
 }
 
 func isCapitalOnly(a string) bool {
@@ -42,20 +51,16 @@ var allDone = errors.New("Error: trying to read data in a done state")
 var InvalidRequest = errors.New("http: invalid request")
 var InvalidHttpRequest = errors.New("Incompatible Version found")
 var InvalidMethod = errors.New("Invalid method")
-
-func newRequest() *Request {
-	return &Request{
-		State: stateIntialized,
-	}
-}
+var bufferOverFlow = errors.New("Buffer Overflow")
 
 func (r *Request) parse(data []byte) (int, error) {
 	bytesConsumed := 0
 outer:
 	for {
+		currentData := data[bytesConsumed:]
 		switch r.State {
 		case stateIntialized:
-			rl, err, n := parseRequestLine(data)
+			rl, err, n := parseRequestLine(currentData)
 			if err != nil {
 				return 0, err
 			}
@@ -64,7 +69,20 @@ outer:
 			}
 			r.RequestLine = *rl
 			bytesConsumed += n
-			r.State = stateDone
+			r.State = stateHeaders
+		case stateHeaders:
+			n, done, err := r.Headers.Parse(currentData)
+			if err != nil {
+				r.State = stateError
+				return 0, err
+			}
+			if n == 0 {
+				break outer
+			}
+			bytesConsumed += n
+			if done {
+				r.State = stateDone
+			}
 		case stateDone:
 			break outer
 		}
@@ -73,7 +91,7 @@ outer:
 }
 
 func (r *Request) isDone() bool {
-	return r.State == stateDone
+	return r.State == stateDone || r.State == stateError
 }
 
 func parseRequestLine(data []byte) (*RequestLine, error, int) {
@@ -104,24 +122,29 @@ func parseRequestLine(data []byte) (*RequestLine, error, int) {
 }
 
 func RequestFromReader(reader io.Reader) (*Request, error) {
-	buff := make([]byte, bufferSize, bufferSize)
+	buff := make([]byte, 8196)
 	request := newRequest()
 	readToIndex := 0
 	for !request.isDone() {
 		if len(buff) == readToIndex {
-			newBuff := make([]byte, len(buff)*2)
-			copy(newBuff, buff)
-			buff = newBuff
+			return nil, bufferOverFlow
 		}
 		n, err := reader.Read(buff[readToIndex:])
-		if err == io.EOF {
-			request.State = stateDone
+		readToIndex += n
+		if readToIndex > 0 {
+			readN, err := request.parse(buff[:readToIndex])
+			if err != nil {
+				return nil, err
+			}
+			copy(buff, buff[readN:readToIndex])
+			readToIndex -= readN
+		}
+		if request.State == stateDone {
 			break
 		}
-		readToIndex += n
-		readN, err := request.parse(buff[:readToIndex])
-		copy(buff, buff[readN:readToIndex])
-		readToIndex -= readN
+		if err != nil {
+			return nil, err
+		}
 	}
 	return request, nil
 }

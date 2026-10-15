@@ -18,6 +18,10 @@ func handleConnection(conn net.Conn) {
 	fmt.Println("- Method:", req.RequestLine.Method)
 	fmt.Println("- Target:", req.RequestLine.RequestTarget)
 	fmt.Println("- HTTP version:", req.RequestLine.HttpVersion)
+	fmt.Println("Headers")
+	req.Headers.ForEach(func(key, value string) {
+		fmt.Printf("%s: %s\n", key, value)
+	})
 	fmt.Println()
 }
 

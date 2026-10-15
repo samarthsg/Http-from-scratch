@@ -53,6 +53,11 @@ func isValid(name string) bool {
 	}
 	return true
 }
+func (h *Headers) ForEach(fn func(key, value string)) {
+	for key, value := range h.headers {
+		fn(key, value)
+	}
+}
 
 func extractInfo(header []byte) (string, string, error) {
 	parts := bytes.SplitN(header, []byte(":"), 2)

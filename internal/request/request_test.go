@@ -1,56 +1,195 @@
 package request
 
 import (
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"io"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type chunkReader struct {
 	data            string
 	numBytesPerRead int
-	pos             int
 }
 
-// Read reads up to len(p) or numBytesPerRead bytes from the string per call
-// its useful for simulating reading a variable number of bytes per chunk from a network connection
-func (cr *chunkReader) Read(p []byte) (n int, err error) {
-	if cr.pos >= len(cr.data) {
+func (cr *chunkReader) Read(p []byte) (int, error) {
+	if len(cr.data) == 0 {
 		return 0, io.EOF
 	}
-	endIndex := cr.pos + cr.numBytesPerRead
-	if endIndex > len(cr.data) {
-		endIndex = len(cr.data)
-	}
-	n = copy(p, cr.data[cr.pos:endIndex])
-	cr.pos += n
+
+	n := min(len(p), cr.numBytesPerRead, len(cr.data))
+	copy(p, cr.data[:n])
+	cr.data = cr.data[n:]
 
 	return n, nil
 }
 
-func TestRequestLineParse(t *testing.T) {
-	// Test: Good GET Request line
-	reader := &chunkReader{
-		data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
-		numBytesPerRead: 3,
+func TestRequestFromReader(t *testing.T) {
+	tests := []struct {
+		name      string
+		data      string
+		chunkSize int
+		wantError bool
+		method    string
+		target    string
+		version   string
+		headers   map[string]string
+	}{
+		{
+			name:      "request with headers in small chunks",
+			data:      "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+			chunkSize: 3,
+			method:    "GET",
+			target:    "/",
+			version:   "1.1",
+			headers: map[string]string{
+				"host":       "localhost:42069",
+				"user-agent": "curl/7.81.0",
+				"accept":     "*/*",
+			},
+		},
+		{
+			name:      "request with headers in one chunk",
+			data:      "GET /hello HTTP/1.1\r\nHost: example.com\r\n\r\n",
+			chunkSize: 1024,
+			method:    "GET",
+			target:    "/hello",
+			version:   "1.1",
+			headers: map[string]string{
+				"host": "example.com",
+			},
+		},
+		{
+			name:      "request line only",
+			data:      "GET / HTTP/1.1\r\n\r\n",
+			chunkSize: 1024,
+			method:    "GET",
+			target:    "/",
+			version:   "1.1",
+			headers:   map[string]string{},
+		},
+		{
+			name:      "invalid request line",
+			data:      "GET / HTTP/1.1 extra\r\n\r\n",
+			chunkSize: 1024,
+			wantError: true,
+		},
+		{
+			name:      "unsupported HTTP version",
+			data:      "GET / HTTP/2.0\r\n\r\n",
+			chunkSize: 1024,
+			wantError: true,
+		},
+		{
+			name:      "invalid lowercase method",
+			data:      "get / HTTP/1.1\r\n\r\n",
+			chunkSize: 1024,
+			wantError: true,
+		},
+		{
+			name:      "incomplete request line",
+			data:      "GET / HTTP/1.1",
+			chunkSize: 3,
+			wantError: true,
+		},
+		{
+			name:      "incomplete headers",
+			data:      "GET / HTTP/1.1\r\nHost: example.com\r\n",
+			chunkSize: 3,
+			wantError: true,
+		},
 	}
-	r, err := RequestFromReader(reader)
-	require.NoError(t, err)
-	require.NotNil(t, r)
-	assert.Equal(t, "GET", r.RequestLine.Method)
-	assert.Equal(t, "/", r.RequestLine.RequestTarget)
-	assert.Equal(t, "1.1", r.RequestLine.HttpVersion)
 
-	// Test: Good GET Request line with path
-	reader = &chunkReader{
-		data:            "GET /coffee HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
-		numBytesPerRead: 1,
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &chunkReader{
+				data:            tt.data,
+				numBytesPerRead: tt.chunkSize,
+			}
+
+			req, err := RequestFromReader(reader)
+
+			if tt.wantError {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, req)
+
+			assert.Equal(t, tt.method, req.RequestLine.Method)
+			assert.Equal(t, tt.target, req.RequestLine.RequestTarget)
+			assert.Equal(t, tt.version, req.RequestLine.HttpVersion)
+
+			for name, want := range tt.headers {
+				assert.Equal(t, want, req.Headers.Get(name))
+			}
+		})
 	}
-	r, err = RequestFromReader(reader)
-	require.NoError(t, err)
-	require.NotNil(t, r)
-	assert.Equal(t, "GET", r.RequestLine.Method)
-	assert.Equal(t, "/coffee", r.RequestLine.RequestTarget)
-	assert.Equal(t, "1.1", r.RequestLine.HttpVersion)
+}
+
+func TestParseRequestLine(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantError error
+		method    string
+		target    string
+		version   string
+		wantN     int
+	}{
+		{
+			name:    "valid request line",
+			input:   "GET / HTTP/1.1\r\n",
+			method:  "GET",
+			target:  "/",
+			version: "1.1",
+			wantN:   len("GET / HTTP/1.1\r\n"),
+		},
+		{
+			name:      "missing fields",
+			input:     "GET /\r\n",
+			wantError: InvalidRequest,
+		},
+		{
+			name:      "invalid HTTP version",
+			input:     "GET / HTTP/2.0\r\n",
+			wantError: InvalidHttpRequest,
+		},
+		{
+			name:      "invalid method",
+			input:     "get / HTTP/1.1\r\n",
+			wantError: InvalidMethod,
+		},
+		{
+			name:  "incomplete line",
+			input: "GET / HTTP/1.1",
+			wantN: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			line, err, n := parseRequestLine([]byte(tt.input))
+
+			if tt.wantError != nil {
+				require.ErrorIs(t, err, tt.wantError)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantN, n)
+
+			if tt.wantN == 0 {
+				assert.Nil(t, line)
+				return
+			}
+
+			require.NotNil(t, line)
+			assert.Equal(t, tt.method, line.Method)
+			assert.Equal(t, tt.target, line.RequestTarget)
+			assert.Equal(t, tt.version, line.HttpVersion)
+		})
+	}
 }
