@@ -69,6 +69,14 @@ func getInt(headers *headers.Headers, name string, defaultValue int) (int, error
 	return value, nil
 }
 
+func (r *Request) hasBody() bool {
+	length, err := getInt(r.Headers, "Content-Length", 0)
+	if err != nil || length == 0 {
+		return false
+	}
+	return true
+}
+
 func (r *Request) parse(data []byte) (int, error) {
 	bytesConsumed := 0
 outer:
@@ -100,11 +108,10 @@ outer:
 			}
 			bytesConsumed += n
 			if done {
-				_, exists := r.Headers.Get("Content-Length")
-				if !exists {
-					r.State = stateDone
-				} else {
+				if r.hasBody() {
 					r.State = stateBody
+				} else {
+					r.State = stateDone
 				}
 			}
 		case stateBody:
