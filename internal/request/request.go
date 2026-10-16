@@ -5,6 +5,7 @@ import (
 	"errors"
 	"http-from-scratch/internal/headers"
 	"io"
+	"strconv"
 )
 
 type parserState int
@@ -12,6 +13,7 @@ type parserState int
 const (
 	stateIntialized parserState = iota
 	stateHeaders
+	stateBody
 	stateDone
 	stateError
 )
@@ -26,6 +28,7 @@ type Request struct {
 	RequestLine RequestLine
 	State       parserState
 	Headers     *headers.Headers
+	Body        []byte
 }
 
 func newRequest() *Request {
@@ -34,6 +37,13 @@ func newRequest() *Request {
 		Headers: headers.NewHeaders(),
 	}
 }
+
+var allDone = errors.New("Error: trying to read data in a done state")
+var InvalidRequest = errors.New("http: invalid request")
+var InvalidHttpRequest = errors.New("Incompatible Version found")
+var InvalidMethod = errors.New("Invalid method")
+var bufferOverFlow = errors.New("Buffer Overflow")
+var contentLengthMismatch = errors.New("Content-Length mistmatch")
 
 func isCapitalOnly(a string) bool {
 	if len(a) == 0 {
@@ -47,17 +57,26 @@ func isCapitalOnly(a string) bool {
 	return true
 }
 
-var allDone = errors.New("Error: trying to read data in a done state")
-var InvalidRequest = errors.New("http: invalid request")
-var InvalidHttpRequest = errors.New("Incompatible Version found")
-var InvalidMethod = errors.New("Invalid method")
-var bufferOverFlow = errors.New("Buffer Overflow")
+func getInt(headers *headers.Headers, name string, defaultValue int) (int, error) {
+	strValue, exist := headers.Get(name)
+	if !exist {
+		return defaultValue, nil
+	}
+	value, err := strconv.Atoi(strValue)
+	if err != nil {
+		return defaultValue, err
+	}
+	return value, nil
+}
 
 func (r *Request) parse(data []byte) (int, error) {
 	bytesConsumed := 0
 outer:
 	for {
 		currentData := data[bytesConsumed:]
+		if len(currentData) == 0 {
+			break outer
+		}
 		switch r.State {
 		case stateIntialized:
 			rl, err, n := parseRequestLine(currentData)
@@ -81,9 +100,34 @@ outer:
 			}
 			bytesConsumed += n
 			if done {
+				_, exists := r.Headers.Get("Content-Length")
+				if !exists {
+					r.State = stateDone
+				} else {
+					r.State = stateBody
+				}
+			}
+		case stateBody:
+			length, err := getInt(r.Headers, "Content-Length", 0)
+			if err != nil {
+				r.State = stateError
+				return 0, err
+			}
+			if length < 0 {
+				r.State = stateError
+				return 0, contentLengthMismatch
+			}
+			if length == 0 {
+				r.State = stateDone
+				break outer
+			}
+			remaining := min(length-len(r.Body), len(currentData))
+			r.Body = append(r.Body, currentData[:remaining]...)
+			bytesConsumed += remaining
+			if len(r.Body) == length {
 				r.State = stateDone
 			}
-		case stateDone:
+		case stateDone, stateError:
 			break outer
 		}
 	}
@@ -130,21 +174,16 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 			return nil, bufferOverFlow
 		}
 		n, err := reader.Read(buff[readToIndex:])
-		readToIndex += n
-		if readToIndex > 0 {
-			readN, err := request.parse(buff[:readToIndex])
-			if err != nil {
-				return nil, err
-			}
-			copy(buff, buff[readN:readToIndex])
-			readToIndex -= readN
-		}
-		if request.State == stateDone {
-			break
-		}
 		if err != nil {
 			return nil, err
 		}
+		readToIndex += n
+		readN, err := request.parse(buff[:readToIndex])
+		if err != nil {
+			return nil, err
+		}
+		copy(buff, buff[readN:readToIndex])
+		readToIndex -= readN
 	}
 	return request, nil
 }

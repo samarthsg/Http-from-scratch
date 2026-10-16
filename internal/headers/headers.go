@@ -22,8 +22,9 @@ func NewHeaders() *Headers {
 	}
 }
 
-func (h *Headers) Get(name string) string {
-	return h.headers[strings.ToLower(name)]
+func (h *Headers) Get(name string) (string, bool) {
+	str, found := h.headers[strings.ToLower(name)]
+	return str, found
 }
 
 func (h *Headers) Set(name, value string) {
@@ -53,6 +54,7 @@ func isValid(name string) bool {
 	}
 	return true
 }
+
 func (h *Headers) ForEach(fn func(key, value string)) {
 	for key, value := range h.headers {
 		fn(key, value)

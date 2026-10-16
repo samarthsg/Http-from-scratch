@@ -35,6 +35,7 @@ func TestRequestFromReader(t *testing.T) {
 		target    string
 		version   string
 		headers   map[string]string
+		body      string
 	}{
 		{
 			name:      "request with headers in small chunks",
@@ -48,6 +49,7 @@ func TestRequestFromReader(t *testing.T) {
 				"user-agent": "curl/7.81.0",
 				"accept":     "*/*",
 			},
+			body: "",
 		},
 		{
 			name:      "request with headers in one chunk",
@@ -59,6 +61,7 @@ func TestRequestFromReader(t *testing.T) {
 			headers: map[string]string{
 				"host": "example.com",
 			},
+			body: "",
 		},
 		{
 			name:      "request line only",
@@ -68,6 +71,7 @@ func TestRequestFromReader(t *testing.T) {
 			target:    "/",
 			version:   "1.1",
 			headers:   map[string]string{},
+			body:      "",
 		},
 		{
 			name:      "invalid request line",
@@ -99,6 +103,78 @@ func TestRequestFromReader(t *testing.T) {
 			chunkSize: 3,
 			wantError: true,
 		},
+		{
+			name: "Standard Body",
+			data: "POST /submit HTTP/1.1\r\n" +
+				"Host: localhost:42069\r\n" +
+				"Content-Length: 13\r\n" +
+				"\r\n" +
+				"hello world!\n",
+			chunkSize: 3,
+			method:    "POST",
+			target:    "/submit",
+			version:   "1.1",
+			headers: map[string]string{
+				"host":           "localhost:42069",
+				"content-length": "13",
+			},
+			body: "hello world!\n",
+		},
+		{
+			name: "Empty Body, 0 reported content length",
+			data: "POST /submit HTTP/1.1\r\n" +
+				"Host: localhost:42069\r\n" +
+				"Content-Length: 0\r\n" +
+				"\r\n",
+			chunkSize: 3,
+			method:    "POST",
+			target:    "/submit",
+			version:   "1.1",
+			headers: map[string]string{
+				"host":           "localhost:42069",
+				"content-length": "0",
+			},
+			body: "",
+		},
+		{
+			name: "Empty Body, no reported content length",
+			data: "POST /submit HTTP/1.1\r\n" +
+				"Host: localhost:42069\r\n" +
+				"\r\n",
+			chunkSize: 3,
+			method:    "POST",
+			target:    "/submit",
+			version:   "1.1",
+			headers: map[string]string{
+				"host": "localhost:42069",
+			},
+			body: "",
+		},
+		{
+			name: "Body shorter than reported content length",
+			data: "POST /submit HTTP/1.1\r\n" +
+				"Host: localhost:42069\r\n" +
+				"Content-Length: 20\r\n" +
+				"\r\n" +
+				"partial content",
+			chunkSize: 3,
+			wantError: true,
+		},
+		{
+			name: "No Content-Length but Body Exists",
+			data: "POST /submit HTTP/1.1\r\n" +
+				"Host: localhost:42069\r\n" +
+				"\r\n" +
+				"some body data",
+			chunkSize: 3,
+			method:    "POST",
+			target:    "/submit",
+			version:   "1.1",
+			headers: map[string]string{
+				"host": "localhost:42069",
+			},
+			body: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -123,8 +199,12 @@ func TestRequestFromReader(t *testing.T) {
 			assert.Equal(t, tt.version, req.RequestLine.HttpVersion)
 
 			for name, want := range tt.headers {
-				assert.Equal(t, want, req.Headers.Get(name))
+				got, exists := req.Headers.Get(name)
+				assert.True(t, exists, "expected header %q to exist", name)
+				assert.Equal(t, want, got)
 			}
+
+			assert.Equal(t, tt.body, string(req.Body))
 		})
 	}
 }
