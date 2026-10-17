@@ -25,7 +25,6 @@ func handleConnection(conn net.Conn) {
 	fmt.Println("Body:")
 	fmt.Println("BODY_STRING")
 	fmt.Println(string(req.Body))
-	fmt.Println()
 }
 
 func main() {
