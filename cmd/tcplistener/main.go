@@ -22,6 +22,9 @@ func handleConnection(conn net.Conn) {
 	req.Headers.ForEach(func(key, value string) {
 		fmt.Printf("%s: %s\n", key, value)
 	})
+	fmt.Println("Body:")
+	fmt.Println("BODY_STRING")
+	fmt.Println(string(req.Body))
 	fmt.Println()
 }
 
