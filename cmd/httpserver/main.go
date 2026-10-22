@@ -1,6 +1,7 @@
 package main
 
 import (
+	"http-from-scratch/internal/server"
 	"log"
 	"os"
 	"os/signal"
