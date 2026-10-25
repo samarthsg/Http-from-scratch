@@ -1,6 +1,10 @@
 package server
 
-import "net"
+import (
+	"net"
+)
+
+const port = "42069"
 
 type serverState int
 
@@ -15,6 +19,18 @@ type Server struct {
 
 func Serve(port int) (*Server, error) {
 	server := &Server{}
+	listner, err := net.Listen("tcp", "42069")
+	if err != nil {
+		return nil, err
+	}
+	defer listner.Close()
+	for {
+		conn, err := listner.Accept()
+		if err != nil {
+			return nil, err
+		}
+		defer conn.Close()
+	}
 	return server, nil
 }
 
