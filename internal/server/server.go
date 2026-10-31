@@ -2,36 +2,20 @@ package server
 
 import (
 	"net"
-)
-
-const port = "42069"
-
-type serverState int
-
-const (
-	stateIntilaized serverState = iota
-	stateDone
+	"strconv"
 )
 
 type Server struct {
-	State serverState
+	Listener net.Listener
 }
 
 func Serve(port int) (*Server, error) {
-	server := &Server{}
-	listner, err := net.Listen("tcp", "42069")
+	addr := ":" + strconv.Itoa(port)
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	defer listner.Close()
-	for {
-		conn, err := listner.Accept()
-		if err != nil {
-			return nil, err
-		}
-		defer conn.Close()
-	}
-	return server, nil
+	return &Server{Listener: listener}, nil
 }
 
 func (s *Server) Close() error {
