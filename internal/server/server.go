@@ -3,10 +3,12 @@ package server
 import (
 	"net"
 	"strconv"
+	"sync/atomic"
 )
 
 type Server struct {
 	Listener net.Listener
+	Closed   atomic.Bool
 }
 
 func Serve(port int) (*Server, error) {
@@ -15,7 +17,9 @@ func Serve(port int) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{Listener: listener}, nil
+	server := &Server{Listener: listener}
+	go server.listen()
+	return server, nil
 }
 
 func (s *Server) Close() error {
@@ -23,7 +27,10 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) listen() {
-
+	conn, err := s.Listener.Accept()
+	if err != nil {
+		conn.Close()
+	}
 }
 
 func (s *Server) handle(conn net.Conn) {
