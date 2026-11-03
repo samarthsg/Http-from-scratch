@@ -27,9 +27,13 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) listen() {
-	conn, err := s.Listener.Accept()
-	if err != nil {
-		conn.Close()
+	for {
+		conn, err := s.Listener.Accept()
+		if err != nil {
+			return
+		}
+		println("Connection accpeted")
+		go s.handle(conn)
 	}
 }
 
