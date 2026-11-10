@@ -1,6 +1,9 @@
 package server
 
 import (
+	"fmt"
+	"http-from-scratch/internal/request"
+	"log"
 	"net"
 	"strconv"
 	"sync/atomic"
@@ -38,5 +41,22 @@ func (s *Server) listen() {
 }
 
 func (s *Server) handle(conn net.Conn) {
+	defer conn.Close()
+	req, err := request.RequestFromReader(conn)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	fmt.Println("Request line:")
+	fmt.Println("- Method:", req.RequestLine.Method)
+	fmt.Println("- Target:", req.RequestLine.RequestTarget)
+	fmt.Println("- HTTP version:", req.RequestLine.HttpVersion)
+	fmt.Println("Headers")
+	req.Headers.ForEach(func(key, value string) {
+		fmt.Printf("%s: %s\n", key, value)
+	})
+	fmt.Println("Body:")
+	fmt.Println("BODY_STRING")
+	fmt.Println(string(req.Body))
 
 }
