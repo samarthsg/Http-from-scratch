@@ -26,16 +26,20 @@ func Serve(port int) (*Server, error) {
 }
 
 func (s *Server) Close() error {
-	return nil
+	s.Closed.Store(true)
+	return s.Listener.Close()
 }
 
 func (s *Server) listen() {
 	for {
 		conn, err := s.Listener.Accept()
 		if err != nil {
-			return
+			if s.Closed.Load() {
+				return
+			}
+			log.Printf("Error accepting connection: %v", err)
+			continue
 		}
-		println("Connection accpeted")
 		go s.handle(conn)
 	}
 }
@@ -58,5 +62,4 @@ func (s *Server) handle(conn net.Conn) {
 	fmt.Println("Body:")
 	fmt.Println("BODY_STRING")
 	fmt.Println(string(req.Body))
-
 }
